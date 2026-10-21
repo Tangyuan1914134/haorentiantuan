@@ -17,6 +17,9 @@ const API_BASE_URL = (process.env.API_BASE_URL || 'https://image.mlgb7.com/v1').
 const API_KEY = process.env.IMAGE_API_KEY || '';
 const API_ASYNC = process.env.IMAGE_ASYNC !== 'false';
 const MAX_UPSTREAM_WAIT = LIMIT('MAX_UPSTREAM_WAIT_SECONDS', 540, 600) * 1000;
+// Async task creation should return quickly. Do not wait several minutes on an unacknowledged POST.
+const SUBMIT_TIMEOUT = LIMIT('UPSTREAM_SUBMIT_TIMEOUT_SECONDS', 60, 120) * 1000;
+const POLL_TIMEOUT = LIMIT('UPSTREAM_POLL_TIMEOUT_SECONDS', 20, 90) * 1000;
 const MODELS = (process.env.IMAGE_MODELS || 'gpt-image-2.5-sunburst,gpt-image-2.5-flare,gpt-image-2.5').split(',').map(s => s.trim()).filter(Boolean);
 const RATIOS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'];
 const QUALITY = ['auto','low','medium','high'];
@@ -94,7 +97,7 @@ function validate(input){
   return {prompt,options:{model,ratio,quality,count},files};
 }
 function publicJob(job,results=false) {
-  return {id:job.id,status:job.status,progress:job.progress,error:job.error,created:job.created,finished:job.finished,position:job.status==='queued'?waiting.indexOf(job.id)+1:0,active:running,waiting:waiting.length,...(results&&job.status==='succeeded'?{images:job.images}: {})};
+  return {id:job.id,status:job.status,phase:job.phase||'queued',progress:job.progress,error:job.error,created:job.created,started:job.started,finished:job.finished,polls:job.polls||0,submitMs:job.submitMs||0,position:job.status==='queued'?waiting.indexOf(job.id)+1:0,active:running,waiting:waiting.length,...(results&&job.status==='succeeded'?{images:job.images}: {})};
 }
 function cleanup(){
   for(const [id,job] of jobs){
@@ -126,8 +129,13 @@ function parseUpstream(data) {
   if(images.length && (!status || ['success','succeeded','completed','done','finished'].includes(status)))return {kind:'done',images};
   if(['error','failed','cancelled','canceled'].includes(status))return {kind:'error',message:String(entry?.error?.message||entry?.error||data?.message||'上游任务失败')};
   const taskId=entry?.task_id||data?.task_id||(status?entry?.id||data?.id:null);
-  if(taskId)return {kind:'async',id:String(taskId)};
+  if(taskId) {
+    if(['success','succeeded','completed','done','finished'].includes(status)&&!images.length)
+      return {kind:'pending',id:String(taskId),status:'completed-without-images'};
+    return {kind:'async',id:String(taskId),status};
+  }
   if(images.length)return {kind:'done',images};
+  if(['queued','pending','processing','running','in_progress','generating'].includes(status))return {kind:'pending',status};
   return {kind:'error',message:'无法识别中转站返回的任务格式，请核对上游 API 文档'};
 }
 async function requestJson(url,options){
@@ -137,6 +145,18 @@ async function requestJson(url,options){
   try {data=JSON.parse(txt);}catch {throw Error('上游返回 HTTP '+response.status+'（非 JSON）。'+(response.status===524?'中转站等待模型超时，建议使用支持异步任务的线路。':'请检查中转站状态。'));}
   if(!response.ok)throw Error('上游 HTTP '+response.status+'：'+String(data?.error?.message||data?.message||'请求失败').slice(0,180));
   return data;
+}
+// Every network request has its own deadline, in addition to the task's overall deadline.
+// Never expose the Authorization header, prompts, images, or upstream response body in logs.
+async function requestTimed(url,options,timeoutMs,label){
+  const timeout=AbortSignal.timeout(timeoutMs);
+  const linked=options.signal ? AbortSignal.any([options.signal,timeout]) : timeout;
+  try{return await requestJson(url,{...options,signal:linked});}
+  catch(err){
+    if(timeout.aborted && !options.signal?.aborted)
+      throw Error(label+'超过 '+Math.ceil(timeoutMs/1000)+' 秒。上游可能已受理任务，但尚未返回可查询的任务编号；请先查看中转站生成记录，不要立即重复提交。');
+    throw err;
+  }
 }
 const wait = (ms,signal)=>new Promise((resolve,reject)=>{
   if(signal.aborted)return reject(signal.reason||Error('已取消'));
@@ -173,42 +193,81 @@ async function generate(job,signal){
   if(files.length){
     body=new FormData();
     for(const [k,v] of Object.entries(fields))body.append(k,String(v));
+    // Some compatible gateways inspect multipart fields instead of query parameters.
+    if(API_ASYNC)body.append('async','true');
     for(const [i,file] of files.entries())body.append(files.length===1?'image':'image[]',new Blob([file.bytes],{type:file.type}),'reference-'+i+'.'+(file.type==='image/jpeg'?'jpg':file.type.split('/')[1]));
   }else {
     headers['Content-Type']='application/json';
     body=JSON.stringify(fields);
   }
   const endpoint=API_BASE_URL+(files.length?'/images/edits':'/images/generations')+(API_ASYNC?'?async=true':'');
-  job.progress='已提交请求，等待上游响应';
-  let result=parseUpstream(await requestJson(endpoint,{method:'POST',headers,body,signal}));
+  job.phase='submitting';
+  job.progress='正在请求上游任务编号';
+  const started=Date.now();
+  const response=await requestTimed(endpoint,{method:'POST',headers,body,signal},API_ASYNC?SUBMIT_TIMEOUT:MAX_UPSTREAM_WAIT,'上游提交请求');
+  job.submitMs=Date.now()-started;
+  let result=parseUpstream(response);
+  console.info('[image-task]',job.id.slice(0,8),'submit_ms='+job.submitMs,'response='+result.kind,'mode='+(files.length?'edit':'generate'));
   if(result.kind==='error')throw Error(result.message);
-  if(result.kind==='done')return materialize(result.images,signal);
+  if(result.kind==='done'){
+    job.phase='delivering';job.progress='图片已生成，正在整理作品';
+    return materialize(result.images,signal);
+  }
+  if(!result.id)throw Error('上游没有返回可查询的任务编号，无法追踪生成结果');
   const taskId=result.id;
   const queryUrl=new URL('/api/image-tasks',new URL(API_BASE_URL).origin);
   queryUrl.searchParams.set('ids',taskId);
   const deadline=Date.now()+MAX_UPSTREAM_WAIT;
+  let timeoutCount=0,completedWithoutImages=0;
+  job.phase='generating';
+  job.progress='任务已受理，正在等待模型生成';
   while(Date.now()<deadline){
-    job.progress='上游正在生成图片（异步任务）';
     await wait(2500,signal);
-    result=parseUpstream(await requestJson(queryUrl,{headers:{Authorization:'Bearer '+API_KEY},signal}));
-    if(result.kind==='done')return materialize(result.images,signal);
+    job.polls=(job.polls||0)+1;
+    let state;
+    try{
+      state=await requestTimed(queryUrl,{headers:{Authorization:'Bearer '+API_KEY},signal},POLL_TIMEOUT,'查询上游任务');
+      timeoutCount=0;
+    }catch(err){
+      if(signal.aborted)throw err;
+      if(++timeoutCount<3){
+        job.progress='查询暂时缓慢，正在重试（'+timeoutCount+'/2）';
+        continue;
+      }
+      throw Error('连续 3 次查询上游失败：'+err.message);
+    }
+    result=parseUpstream(state);
+    if(result.kind==='done'){
+      job.phase='delivering';
+      job.progress='图片已经生成，正在取回作品';
+      console.info('[image-task]',job.id.slice(0,8),'polls='+job.polls,'phase=download');
+      return materialize(result.images,signal);
+    }
     if(result.kind==='error')throw Error(result.message);
+    if(result.status==='completed-without-images'){
+      if(++completedWithoutImages>=4)
+        throw Error('上游报告已完成，但连续 4 次查询都没有返回图片。请检查中转站生成记录。');
+      job.progress='上游已完成，等待返回图片地址';
+    }else{
+      completedWithoutImages=0;
+      job.progress='上游正在绘制作品 · 查询 '+job.polls+' 次';
+    }
   }
-  throw Error('上游任务超过等待上限，请稍后再试');
+  throw Error('等待生成超时。上游任务可能仍在运行；请在中转站核对记录。');
 }
 function pump(){
   while(running<MAX_CONCURRENT&&waiting.length){
     const id=waiting.shift(),job=jobs.get(id);
     if(!job||job.status!=='queued')continue;
-    running++;job.status='running';job.progress='正在准备生成';job.started=Date.now();
+    running++;job.status='running';job.phase='preparing';job.progress='正在准备画布';job.started=Date.now();
     const controller=new AbortController();job.controller=controller;
     const timer=setTimeout(()=>controller.abort(Error('任务已超过最长运行时间')),MAX_UPSTREAM_WAIT+20_000);
     (async()=>{
       try {
         job.images=await generate(job,controller.signal);
-        if(job.status==='running'){job.status='succeeded';job.progress='生成完成';completed++;}
+        if(job.status==='running'){job.status='succeeded';job.phase='done';job.progress='生成完成';completed++;}
       }catch(err){
-        if(job.status==='running'){job.status='failed';job.error=String(err?.message||err).slice(0,350);failed++;}
+        if(job.status==='running'){job.status='failed';job.phase='error';job.error=String(err?.message||err).slice(0,350);failed++;console.warn('[image-task]',job.id.slice(0,8),'failed:',job.error);}
       }finally{
         clearTimeout(timer);
         job.payload=null;job.controller=null;job.finished=Date.now();
@@ -229,7 +288,7 @@ async function handleApi(req,res,url){
     if(waiting.length>=MAX_QUEUED)return failure(res,429,'排队已满，请稍后重试');
     let input;
     try{input=validate(await readJson(req));}catch(err){return failure(res,400,err.message);}
-    const job={id:randomUUID(),owner:id,status:'queued',progress:'等待执行',created:Date.now(),started:0,finished:0,images:[],error:'',payload:input,controller:null};
+    const job={id:randomUUID(),owner:id,status:'queued',phase:'queued',progress:'等待执行',created:Date.now(),started:0,finished:0,images:[],error:'',polls:0,submitMs:0,payload:input,controller:null};
     jobs.set(job.id,job);waiting.push(job.id);ownerBusy.add(id);pump();
     return json(res,202,{job:publicJob(job)});
   }
@@ -240,7 +299,7 @@ async function handleApi(req,res,url){
     if(match[2]&&req.method==='POST'){
       if(job.status==='queued'){const i=waiting.indexOf(job.id);if(i!==-1)waiting.splice(i,1);}
       if(['running','queued'].includes(job.status)){
-        job.status='cancelled';job.progress='已取消';job.error='';job.finished=Date.now();job.controller?.abort(Error('用户取消'));
+        job.status='cancelled';job.phase='cancelled';job.progress='已取消';job.error='';job.finished=Date.now();job.controller?.abort(Error('用户取消'));
         ownerBusy.delete(id);
       }
       return json(res,200,{job:publicJob(job)});

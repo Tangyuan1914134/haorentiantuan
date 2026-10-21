@@ -127,6 +127,53 @@ button:disabled{cursor:not-allowed;opacity:.55}button,select{touch-action:manipu
 .danger-button{border:1px solid #a24d46;background:#ffe1d6;border-radius:7px;padding:9px;font-size:11px;font-weight:800}
 .lightbox{position:fixed;inset:0;background:rgba(22,22,20,.93);display:grid;place-items:center;padding:35px;z-index:60;cursor:zoom-out}
 .lightbox img{max-height:94vh;max-width:94vw;object-fit:contain;border:4px solid #fff;border-radius:6px}
+/* The waiting card animates continuously without requiring server-side progress percentages. */
+.waiting-scene{margin-top:7px;padding:14px 15px 12px;background:#fdf6df;border:1.6px dashed #c5aa77;border-radius:12px;position:relative;overflow:hidden;max-width:650px}
+.sketch-area{height:117px;background:repeating-linear-gradient(to bottom,transparent 0,transparent 22px,#e9dcb9 23px);border:1px dashed #d3c5a5;border-radius:9px;position:relative;overflow:hidden;background-color:#fffbed;margin-bottom:13px;display:flex;align-items:center;justify-content:center}
+.sketch-sheet{height:87px;width:112px;transform:rotate(-5deg);background:#fffdf5;border:2px solid var(--ink);border-radius:5px;box-shadow:4px 4px 0 #98d8cc;position:relative;animation:sketch-bob 4s ease-in-out infinite}
+.sketch-sheet:before{content:"";position:absolute;top:-7px;left:37px;width:38px;height:12px;background:#fce39c;transform:rotate(9deg);border:1px dashed #c7a55c}
+.sketch-sun{position:absolute;left:14px;top:6px;font-size:24px;color:#dfaf4c;animation:sketch-twirl 9s linear infinite}
+.sketch-mountain{position:absolute;bottom:9px;left:21px;font-size:29px;color:#80c6b2;letter-spacing:-7px}
+.sketch-smile{position:absolute;right:15px;bottom:24px;font-size:33px;font-weight:900;color:#df998a}
+.sketch-pencil{font-size:34px;position:absolute;z-index:2;left:calc(50% + 40px);top:51px;filter:drop-shadow(1px 2px 0 #3336);transform-origin:85% 85%;animation:sketch-draw 2.8s ease-in-out infinite}
+.sketch-trace{position:absolute;bottom:8px;left:calc(50% + 49px);font-size:11px;letter-spacing:4px;color:#df947d;animation:sketch-ink 2.8s ease-in-out infinite}
+.floating-star{position:absolute;color:#dc8d72;font-size:24px;animation:sketch-sparkle 2.2s ease-in-out infinite}
+.star-one{left:calc(50% - 97px);top:21px}.star-two{right:calc(50% - 102px);bottom:20px;animation-delay:1s;color:#7db6ad}
+.waiting-title{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}
+.waiting-title>strong{letter-spacing:.2px}
+.working-heartbeat{font-size:10px;color:#6b8573;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.heartbeat-dot{width:7px;height:7px;background:#75bd98;border-radius:50%;animation:sketch-heartbeat 1.5s ease-in-out infinite}
+.waiting-step-list{display:flex;align-items:center;flex-wrap:wrap;gap:7px;color:#999184;font-size:10px;margin:12px 0 11px}
+.waiting-step-list>[data-step]{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.waiting-step-list>[data-step].active{color:#a96348;font-weight:900}
+.waiting-step-list>[data-step].complete{color:#457f69;font-weight:800}
+.step-check{border:1px solid #c4baaa;border-radius:50%;height:18px;min-width:18px;display:inline-grid;place-items:center;font-size:9px;background:#fffaf1}
+[data-step].active .step-check{background:var(--yellow);border-color:#ab7d47;animation:sketch-heartbeat 2s infinite}
+[data-step].complete .step-check{background:var(--mint);border-color:#62b395}
+.steps-connector{color:#b3a999}
+.waiting-detail{border-top:1px dashed #cfbd9e;padding-top:11px;display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.6;word-break:break-word}
+.waiting-detail [data-progress-text]{min-width:0}
+.waiting-footer{display:flex;justify-content:space-between;align-items:center;gap:11px;font-size:11px;color:#777063;margin-top:10px}
+.waiting-tip{min-width:0;line-height:1.5}
+.waiting-time{font-size:13px;font-weight:900;letter-spacing:1px;font-variant-numeric:tabular-nums;background:#e5f1e6;border:1px dashed #8caf9e;border-radius:6px;padding:4px 7px;white-space:nowrap}
+@keyframes sketch-bob{0%,100%{transform:rotate(-5deg) translateY(0)}50%{transform:rotate(-2deg) translateY(-5px)}}
+@keyframes sketch-draw{0%,100%{transform:rotate(-30deg) translate(0,0)}28%{transform:rotate(5deg) translate(-8px,-12px)}60%{transform:rotate(-18deg) translate(7px,4px)}}
+@keyframes sketch-twirl{to{transform:rotate(360deg)}}
+@keyframes sketch-ink{0%,100%{opacity:.25}50%{opacity:.9}}
+@keyframes sketch-sparkle{0%,100%{opacity:.2;transform:scale(.75) rotate(0deg)}50%{opacity:1;transform:scale(1.2) rotate(25deg)}}
+@keyframes sketch-heartbeat{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.75)}}
+@media(max-width:780px){
+  .waiting-scene{padding:9px 10px}
+  .sketch-area{height:100px;margin-bottom:10px}
+  .waiting-step-list{gap:4px;font-size:9px}
+  .step-check{width:15px;height:15px;min-width:15px;font-size:8px}
+  .waiting-title{font-size:12px}
+  .waiting-footer{font-size:10px}
+  .waiting-time{font-size:12px}
+}
+@media(prefers-reduced-motion:reduce){
+  .sketch-sheet,.sketch-pencil,.sketch-trace,.sketch-sun,.floating-star,.heartbeat-dot,.step-check{animation:none!important}
+}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:1050px){
  .sidebar{width:236px;flex-basis:236px;padding:20px 12px}

@@ -95,12 +95,69 @@ function lightbox(src){
   const key=e=>{if(e.key==='Escape'){overlay.remove();window.removeEventListener('keydown',key);}};
   window.addEventListener('keydown',key,{once:true});
 }
+// Static artwork: no downloaded animation assets or extra requests.
+const WAITING_TIPS=[
+  '小画笔正在打草稿，稍等好点子长出来 ✨',
+  '把云朵折成纸飞机，再给想象一点时间 ☁',
+  '调一调颜色，让这幅画更有故事感 🎨',
+  '不需要一直盯着页面，回到这里会继续显示进度 🐾',
+  '创作时间由上游决定，这里的计时是真实经过时间 ⏳',
+  '星星正在排队，准备降落到画纸上 ✦'
+];
+function createWaitingScene(msg){
+  const scene=document.createElement('div');
+  scene.className='waiting-scene';
+  // All HTML here is static. Never interpolate user prompts or upstream responses into HTML.
+  scene.innerHTML=`<div class="sketch-area" aria-hidden="true">
+    <span class="floating-star star-one">✦</span><span class="floating-star star-two">✧</span>
+    <div class="sketch-sheet"><div class="sketch-sun">✳</div><div class="sketch-mountain">⌁⌁</div><div class="sketch-smile">◡</div></div>
+    <span class="sketch-pencil">✏️</span><span class="sketch-trace">· · ·</span>
+  </div>
+  <div class="waiting-title"><strong>灵感正在变成画面</strong><span class="working-heartbeat">创作中 <span class="heartbeat-dot"></span></span></div>
+  <div class="waiting-step-list" aria-label="创作阶段">
+    <span data-step="submitting"><span class="step-check">01</span> 接收想法</span>
+    <span class="steps-connector">→</span>
+    <span data-step="generating"><span class="step-check">02</span> AI 绘制</span>
+    <span class="steps-connector">→</span>
+    <span data-step="delivering"><span class="step-check">03</span> 作品送达</span>
+  </div>
+  <div class="waiting-detail"><span class="status-spinner"></span><span data-progress-text>正在连接上游...</span></div>
+  <div class="waiting-footer"><span class="waiting-tip" data-waiting-tip></span><span class="waiting-time" data-waiting-time>00:00</span></div>`;
+  updateWaitingScene(msg,scene);
+  return scene;
+}
+function updateWaitingScene(msg,scene){
+  scene ||= [...elements.messages.querySelectorAll('article.message')].find(el=>el.dataset.messageId===msg.id)?.querySelector('.waiting-scene');
+  if(!scene)return;
+  const phase=msg.phase||'submitting';
+  const steps=['submitting','generating','delivering'];
+  const active=Math.max(0,steps.indexOf(phase));
+  scene.querySelectorAll('[data-step]').forEach((el,i)=>{
+    el.classList.toggle('active',i===active);
+    el.classList.toggle('complete',i<active);
+  });
+  scene.querySelector('[data-progress-text]').textContent=msg.progress||'正在等待上游回应...';
+  const elapsed=Math.max(0,Math.floor((Date.now()-(msg.time||Date.now()))/1000));
+  const minutes=String(Math.floor(elapsed/60)).padStart(2,'0');
+  const seconds=String(elapsed%60).padStart(2,'0');
+  scene.querySelector('[data-waiting-time]').textContent=minutes+':'+seconds;
+  const hint=elapsed>=60 && phase==='submitting'
+    ? '提交已等待超过 1 分钟，仍在等上游确认；若超时会提示原因'
+    : WAITING_TIPS[Math.floor(elapsed/9)%WAITING_TIPS.length];
+  scene.querySelector('[data-waiting-tip]').textContent=hint;
+}
+function tickWaitingScenes(){
+  for(const msg of current.messages){
+    if(msg.role==='assistant'&&['pending','queued','running'].includes(msg.status))updateWaitingScene(msg);
+  }
+}
+setInterval(tickWaitingScenes,1000);
 function renderMessages(){
   elements.messages.replaceChildren();
   const hasMessages=current.messages.length>0;
   elements.empty.hidden=hasMessages;elements.messages.hidden=!hasMessages;
   for(const msg of current.messages){
-    const section=document.createElement('article');section.className='message '+msg.role;
+    const section=document.createElement('article');section.className='message '+msg.role;section.dataset.messageId=msg.id;
     const bubble=document.createElement('div');bubble.className='bubble';
     bubble.append(makeLabel(msg.role==='user'?'你 · 灵感发起人':'✳ 好人天团 · 创作助手'));
     if(msg.role==='user'){
@@ -108,10 +165,7 @@ function renderMessages(){
       if(msg.refs){const refs=document.createElement('div');refs.className='bubble-info';refs.textContent='▧ 参考图片 '+msg.refs+' 张';bubble.append(refs);}
     } else {
       if(msg.status==='pending'||msg.status==='queued'||msg.status==='running'){
-        const status=document.createElement('div');status.className='bubble-info';
-        const spin=document.createElement('span');spin.className='status-spinner';
-        const label=document.createElement('span');label.textContent=msg.progress||'正在创作，请稍候...';
-        status.append(spin,label);bubble.append(status);
+        bubble.append(createWaitingScene(msg));
       }else if(msg.status==='failed'){
         const div=document.createElement('div');div.className='bubble-error';div.textContent='✕ '+(msg.error||'生成失败');bubble.append(div);
       }else if(msg.status==='cancelled'){
@@ -180,7 +234,7 @@ async function submit(){
   if(mode==='edit'&&!references.length){showToast('改图模式需要先上传或选择一张参考图片');return;}
   current.title=current.messages.length?current.title:prompt.slice(0,24);
   const user={id:crypto.randomUUID(),role:'user',prompt,refs:references.length,time:Date.now()};
-  const answer={id:crypto.randomUUID(),role:'assistant',status:'pending',progress:'正在提交任务',time:Date.now(),jobId:null};
+  const answer={id:crypto.randomUUID(),role:'assistant',status:'pending',phase:'submitting',progress:'正在提交任务',time:Date.now(),jobId:null};
   current.messages.push(user,answer);
   elements.prompt.value='';
   attachments=[];renderAttachments();renderMessages();scrolldown();setWorking(true);
@@ -189,8 +243,8 @@ async function submit(){
     const body={prompt,images:references,options:{model:elements.model.value,ratio:elements.ratio.value,quality:elements.quality.value,count:Number(elements.count.value)}};
     const {job}=await api('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     answer.jobId=job.id;runningId=job.id;
-    answer.status=job.status;answer.progress=job.progress;
-    await save();renderMessages();scrolldown();
+    answer.status=job.status;answer.phase=job.phase||'submitting';answer.progress=job.progress;
+    await save();updateWaitingScene(answer);scrolldown();
     await pollJob(answer);
   }catch(err){
     answer.status='failed';answer.error=err.message;answer.progress='';
@@ -204,7 +258,7 @@ async function pollJob(answer) {
   if(!jobId)throw Error('任务尚未建立');
   for(;;){
     const {job}=await api('/api/jobs/'+encodeURIComponent(jobId));
-    answer.status=job.status;answer.progress=job.progress;
+    answer.status=job.status;answer.phase=job.phase||answer.phase;answer.progress=job.progress;
     if(job.status==='succeeded'){
       answer.images=job.images||[];
       answer.status='succeeded';await save();renderMessages();scrolldown();showToast('✦ 图片创作完成！');
@@ -212,7 +266,8 @@ async function pollJob(answer) {
     }
     if(job.status==='failed')throw Error(job.error||'上游生成失败');
     if(job.status==='cancelled'){answer.status='cancelled';await save();renderMessages();return;}
-    renderMessages();
+    // Keep the same DOM node: rebuilding on each poll would restart the pencil animation.
+    updateWaitingScene(answer);
     $('queue-info').textContent='排队中 '+job.waiting+' · 创作中 '+job.active;
     await new Promise(resolve=>setTimeout(resolve,2300));
   }
