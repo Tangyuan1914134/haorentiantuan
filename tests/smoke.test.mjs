@@ -73,6 +73,27 @@ test('兼容中转站嵌套和 camelCase 任务响应',()=>{
   assert.equal(failed.kind,'error');
   assert.match(failed.message,/model overloaded/);
 });
+test('解析上游 image-tasks 的 items[].results 图片结果',()=>{
+  const result=app.parseUpstream({
+    items:[{
+      id:'upstream-task-1',
+      status:'completed',
+      terminal:true,
+      results:[{url:'https://cdn.example.test/generated.png',path:'/ignored',b64_json:null,width:1024,height:1024}]
+    }],
+    missing_ids:[]
+  });
+  assert.equal(result.kind,'done');
+  assert.deepEqual(result.images,['https://cdn.example.test/generated.png']);
+});
+test('解析上游 image-tasks 中相对结果地址',()=>{
+  const result=app.parseUpstream({
+    items:[{id:'upstream-task-2',status:'completed',terminal:true,results:[{url:'/api/image-tasks/task-2/results/0'}]}],
+    missing_ids:[]
+  });
+  assert.equal(result.kind,'done');
+  assert.deepEqual(result.images,['/api/image-tasks/task-2/results/0']);
+});
 test('首页、健康检查、匿名 cookie、无敏感配置输出',async()=>{
   const page=await fetch(base+'/');assert.equal(page.status,200);
   assert.match(await page.text(),/好人天团/);

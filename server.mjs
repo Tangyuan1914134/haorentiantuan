@@ -110,18 +110,32 @@ setInterval(cleanup,60_000).unref();
 
 function extractImages(data){
   const out=[];
-  const walk=(x,depth=0)=>{
-    if(depth>6||!x)return;
-    if(typeof x==='string'){if(x.startsWith('data:image/')||x.startsWith('https://'))out.push(x);return;}
-    if(Array.isArray(x)){for(const v of x)walk(v,depth+1);return;}
+  const urlKeys=['url','image_url','imageUrl','output_url','outputUrl','result_url','resultUrl','file_url','fileUrl','download_url','downloadUrl','uri'];
+  const nestedKeys=['images','data','items','output','outputs','result','results','image','response','task','tasks','payload','content','artifacts','generated_images','generatedImages'];
+  const relativeImageContainers=new Set(['images','data','output','outputs','result','results','image','content','artifacts','generated_images','generatedImages']);
+  const walk=(x,depth=0,imageContext=false)=>{
+    if(depth>8||x==null)return;
+    if(typeof x==='string'){
+      const value=x.trim();
+      if(value.startsWith('data:image/')||/^https:\/\//i.test(value)||(imageContext&&/^\/(?!\/)/.test(value)))out.push(value);
+      return;
+    }
+    if(Array.isArray(x)){for(const v of x)walk(v,depth+1,imageContext);return;}
     if(typeof x!=='object')return;
-    if(typeof x.b64_json==='string')return walk('data:image/png;base64,'+x.b64_json,depth+1);
-    if(typeof x.base64==='string')return walk('data:image/png;base64,'+x.base64,depth+1);
-    if(typeof x.url==='string')return walk(x.url,depth+1);
-    if(typeof x.image_url==='string')return walk(x.image_url,depth+1);
-    for(const k of ['images','data','output','outputs','result','results','image','response','task','tasks','payload'])if(x[k]!=null)walk(x[k],depth+1);
+    if(typeof x.b64_json==='string'&&x.b64_json)out.push('data:image/png;base64,'+x.b64_json);
+    if(typeof x.base64==='string'&&x.base64)out.push('data:image/png;base64,'+x.base64);
+    for(const key of urlKeys){
+      if(typeof x[key]==='string'&&x[key].trim()){
+        const imageKey=key!=='url'&&key!=='uri';
+        walk(x[key],depth+1,imageContext||imageKey);
+      }
+    }
+    for(const key of nestedKeys){
+      if(x[key]!=null)walk(x[key],depth+1,imageContext||relativeImageContainers.has(key));
+    }
   };
-  walk(data);return [...new Set(out)];
+  walk(data);
+  return [...new Set(out)];
 }
 function parseUpstream(data) {
   const nodes=[];
@@ -215,7 +229,7 @@ async function materialize(items,signal){
       if(item.length>28*1024*1024)throw Error('上游生成图片超过 20MB');
       out.push(item);continue;
     }
-    const url=new URL(item);
+    const url=new URL(item,new URL(API_BASE_URL).origin);
     if(url.protocol!=='https:'||!ALLOWED_IMAGE_HOSTS.has(url.hostname))throw Error('图片 CDN 域名未授权：'+url.hostname+'（请配置 IMAGE_ALLOWED_HOSTS）');
     const response=await fetch(url,{signal,redirect:'error'});
     if(!response.ok)throw Error('下载结果图片失败 HTTP '+response.status);
