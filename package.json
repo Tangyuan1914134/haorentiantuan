@@ -1,0 +1,13 @@
+{
+  "name": "haoren-tiantu",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Memory-only AI image generation and editing web app",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/smoke.test.mjs",
+    "check": "node --check server.mjs && node --check public/app.js"
+  }
+}

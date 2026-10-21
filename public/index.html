@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#fffdf2">
+  <meta name="description" content="好人天团 · 只需灵感，就能生图和改图。聊天记录只保存在你的浏览器。">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <title>好人天团 · AI 生图与改图</title>
+</head>
+<body>
+  <div class="app-shell" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="会话列表">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">✳</div>
+        <div class="brand-copy">
+          <div class="brand-name">好人天团<span class="brand-spark">✦</span></div>
+          <div class="brand-caption">GOOD PEOPLE CLUB</div>
+        </div>
+      </div>
+      <div class="sidebar-note">好点子，从一张图开始 <span>↗</span></div>
+      <button class="new-chat" id="new-chat" type="button"><span class="button-star">✱</span> 开启新灵感 <span>＋</span></button>
+      <div class="sidebar-section-title">我的灵感本 <span id="session-count">0</span></div>
+      <nav id="session-list" class="session-list" aria-label="历史会话"></nav>
+      <div class="sidebar-bottom">
+        <div class="local-note"><span class="local-icon">⌂</span><div><strong>本地收藏本</strong><small>图片与聊天仅保存在本机浏览器</small></div></div>
+        <div class="sidebar-actions">
+          <button type="button" class="subtle-button" id="settings-trigger">⚙ 设置</button>
+          <button type="button" class="subtle-button" id="delete-chat">⌫ 删除本页</button>
+        </div>
+      </div>
+    </aside>
+    <div class="mobile-backdrop" id="mobile-backdrop"></div>
+    <main class="main">
+      <header class="topbar">
+        <div class="top-left">
+          <button class="icon-btn mobile-menu" id="mobile-menu" aria-label="打开会话侧栏" type="button">☰</button>
+          <span class="page-label">✳ 灵感工作室</span>
+        </div>
+        <div class="top-right">
+          <span id="status-dot" class="status-dot"></span><span id="server-status" class="status-text">正在连接...</span>
+          <span class="header-separator">/</span>
+          <span class="version-note">BETA LAB</span>
+        </div>
+      </header>
+      <div class="main-scroll" id="main-scroll">
+        <section class="empty-state" id="empty-state">
+          <div class="scribble scribble-left" aria-hidden="true">✧<br>✳</div>
+          <div class="hero-tape" aria-hidden="true"></div>
+          <div class="hero-card">
+            <div class="hero-kicker"><span>✷</span> THE IDEA PLAYGROUND <span>✷</span></div>
+            <h1>想象一下，<br><em>画出来！</em><span class="hero-underline" aria-hidden="true"></span></h1>
+            <p>脑袋里的奇妙点子，不必只停留在脑袋里。<br>说一句话，或者带上一张图片，让灵感变成现实。</p>
+            <div class="hero-badges"><span>✏️ 一句话生图</span><span>🖼️ 带图改造</span><span>⚡ 轻松上手</span></div>
+          </div>
+          <div class="doodle-arrow" aria-hidden="true">↘</div>
+          <div class="ideas-label">不知道画什么？试试看这些灵感 ↓</div>
+          <div class="suggestion-grid">
+            <button class="suggestion yellow" data-suggestion="一只戴着飞行员护目镜的橘猫，驾驶手绘风格的小飞机，在云朵和星星之间穿梭，童话插画" type="button"><span>☁️</span><strong>飞行的橘猫</strong><small>把猫咪送上云端 ↗</small></button>
+            <button class="suggestion mint" data-suggestion="在蓝色海洋里的巨型玻璃鲸鱼，鲸鱼身体里有发光的微型城市，唯美梦幻，电影光影" type="button"><span>🐳</span><strong>鲸鱼里的城市</strong><small>做一个海底的梦 ↗</small></button>
+            <button class="suggestion coral" data-suggestion="复古漫画风格的宇宙便利店，店员是一只可爱的机器人，窗外是粉紫色星云，丰富细节" type="button"><span>🪐</span><strong>宇宙便利店</strong><small>开一家星际小店 ↗</small></button>
+          </div>
+          <div class="scribble scribble-right" aria-hidden="true">✦<br>✧</div>
+        </section>
+        <section id="chat-messages" class="messages" aria-live="polite" aria-label="当前会话消息" hidden></section>
+      </div>
+      <div class="composer-wrap">
+        <div class="composer-clip" aria-hidden="true"></div>
+        <div class="composer-card">
+          <div class="composer-head">
+            <div class="mode-tabs" role="tablist" aria-label="选择模式">
+              <button type="button" id="mode-generate" class="mode active" role="tab" aria-selected="true">✦ 文字生图</button>
+              <button type="button" id="mode-edit" class="mode" role="tab" aria-selected="false">✎ 图片改造</button>
+            </div>
+            <span class="composer-hint" id="mode-hint">描述你的脑洞</span>
+          </div>
+          <div class="attachments" id="attachments" hidden></div>
+          <textarea id="prompt" rows="2" maxlength="4000" placeholder="今天想画点什么？比如：一只在月亮上吃拉面的柴犬..." aria-label="描述希望生成的图片"></textarea>
+          <div class="composer-footer">
+            <div class="composer-controls">
+              <label class="upload-btn" title="添加参考图片"><input id="image-upload" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden><span>▧</span> 加图片</label>
+              <span class="control-divider"></span>
+              <label class="select-label"><span>模型</span><select id="model" aria-label="模型"></select></label>
+              <label class="select-label"><span>比例</span><select id="ratio" aria-label="比例"><option value="auto">自动</option><option value="1:1">1:1</option><option value="2:3">2:3</option><option value="3:2">3:2</option><option value="3:4">3:4</option><option value="4:3">4:3</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select></label>
+              <label class="select-label compact"><span>张数</span><select id="count" aria-label="张数"><option value="1">1 张</option><option value="2">2 张</option><option value="3">3 张</option><option value="4">4 张</option></select></label>
+              <label class="select-label compact"><span>画质</span><select id="quality" aria-label="画质"><option value="auto">自动</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+            </div>
+            <button id="send" class="send-btn" type="button"><span id="send-label">开始创作</span><span class="send-arrow">↗</span></button>
+          </div>
+        </div>
+        <div class="composer-footnote"><span>✳ 生成内容仅临时经过服务器；保存到浏览器的作品由你掌管</span><span id="queue-info">排队中 0 · 创作中 0</span></div>
+      </div>
+    </main>
+  </div>
+  <dialog id="settings-dialog" class="settings-dialog">
+    <div class="dialog-heading"><h2>✳ 一些小设置</h2><button type="button" id="close-settings" class="icon-btn" aria-label="关闭设置">✕</button></div>
+    <p>没有登录、没有云端相册。你的聊天和图片只保存在此浏览器的 IndexedDB 中，清理网站数据会删除这些内容。</p>
+    <div class="settings-row"><span>本地历史</span><button type="button" class="danger-button" id="clear-history">删除全部聊天和图片</button></div>
+    <div class="settings-row"><span>服务器存储</span><strong>内存任务缓存，完成后过期清理</strong></div>
+    <div class="settings-row"><span>人机验证</span><strong>未启用</strong></div>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

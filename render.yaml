@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: haoren-tiantu
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: API_BASE_URL
+        value: https://image.mlgb7.com/v1
+      - key: IMAGE_API_KEY
+        sync: false
+      - key: IMAGE_ASYNC
+        value: "true"
+      - key: IMAGE_MODELS
+        value: gpt-image-2.5-sunburst,gpt-image-2.5-flare,gpt-image-2.5
+      - key: MAX_CONCURRENT
+        value: "3"
+      - key: MAX_QUEUED
+        value: "30"
+      - key: MAX_UPSTREAM_WAIT_SECONDS
+        value: "540"
