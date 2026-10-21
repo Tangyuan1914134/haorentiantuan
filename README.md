@@ -38,6 +38,7 @@
 | \`MAX_CONCURRENT\` | 3 | 同时进行的上游任务数 |
 | \`MAX_QUEUED\` | 30 | 全站内存等待任务数量 |
 | UPSTREAM_SUBMIT_TIMEOUT_SECONDS | 240 | 上游提交等待上限：兼容忽略异步参数、生成完成才返回的接口 |
+| COMPLETED_WITHOUT_IMAGES_RETRIES | 12 | 上游报告完成但暂未返回图片时的连续查询次数，最大 30 次 |
 | \`MAX_UPSTREAM_WAIT_SECONDS\` | 540 | 异步轮询最长等待 |
   
 **异步 API 注意：** 若中转站支持异步任务编号，就通过 GET /api/image-tasks?ids=... 查询；如果中转站忽略 async=true 并且直接返回图片，本站将最多等待 240 秒（可配置）。如果上游返回 HTTP 524，本站延长等待也不能消除上游代理超时。

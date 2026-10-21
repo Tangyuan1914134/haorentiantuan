@@ -17,6 +17,7 @@ const API_BASE_URL = (process.env.API_BASE_URL || 'https://image.mlgb7.com/v1').
 const API_KEY = process.env.IMAGE_API_KEY || '';
 const API_ASYNC = process.env.IMAGE_ASYNC !== 'false';
 const MAX_UPSTREAM_WAIT = LIMIT('MAX_UPSTREAM_WAIT_SECONDS', 540, 600) * 1000;
+const COMPLETED_WITHOUT_IMAGES_RETRIES = LIMIT('COMPLETED_WITHOUT_IMAGES_RETRIES', 12, 30);
 // Some gateways ignore async=true and return generated images directly after 60+ seconds.
 // Keep the upstream POST alive without blocking the browser's own queued-job request.
 const SUBMIT_TIMEOUT = LIMIT('UPSTREAM_SUBMIT_TIMEOUT_SECONDS', 240, 600) * 1000;
@@ -288,9 +289,10 @@ async function generate(job,signal){
     }
     if(result.kind==='error')throw Error(result.message);
     if(result.status==='completed-without-images'){
-      if(++completedWithoutImages>=4)
-        throw Error('上游报告已完成，但连续 4 次查询都没有返回图片。请检查中转站生成记录。');
-      job.progress='上游已完成，等待返回图片地址';
+      completedWithoutImages++;
+      if(completedWithoutImages>=COMPLETED_WITHOUT_IMAGES_RETRIES)
+        throw Error('上游报告已完成，但连续 '+COMPLETED_WITHOUT_IMAGES_RETRIES+' 次查询都没有返回图片。请检查中转站生成记录。');
+      job.progress='上游已完成，等待图片数据（'+completedWithoutImages+'/'+COMPLETED_WITHOUT_IMAGES_RETRIES+'）';
     }else{
       completedWithoutImages=0;
       job.progress='上游正在绘制作品 · 查询 '+job.polls+' 次';
@@ -373,4 +375,4 @@ const server=http.createServer(async(req,res)=>{
 if(process.env.NODE_ENV!=='test'&&process.env.RUN_TEST_SERVER!=='false'){
   server.listen(PORT,HOST,()=>console.log('好人天团 listening on '+HOST+':'+PORT+' | memory-only | upstream '+(API_KEY?'configured':'missing')));
 }
-export {server,parseUpstream,extractImages,validate,SUBMIT_TIMEOUT};
+export {server,parseUpstream,extractImages,validate,SUBMIT_TIMEOUT,COMPLETED_WITHOUT_IMAGES_RETRIES};

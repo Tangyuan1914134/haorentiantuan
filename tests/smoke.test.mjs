@@ -9,6 +9,7 @@ function stop(server) {return new Promise(resolve=>server.close(resolve));}
 
 let generationRequests=0;
 let editRequests=0;
+let lateImagePolls=0;
 const upstream=http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost');
   const send=data=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(data));};
@@ -22,7 +23,8 @@ const upstream=http.createServer(async(req,res)=>{
       await new Promise(resolve=>setTimeout(resolve,1200));
       return send({data:[{b64_json:'aGVsbG8='}]});
     }
-    return send({status:'queued',task_id:data.prompt.includes('slow')?'slow':'gen1'});
+    const taskId=data.prompt.includes('late-images')?'late-images':data.prompt.includes('slow')?'slow':'gen1';
+    return send({status:'queued',task_id:taskId});
   }
   if(req.method==='POST' && url.pathname==='/v1/images/edits'){
     editRequests++;
@@ -32,6 +34,11 @@ const upstream=http.createServer(async(req,res)=>{
   }
   if(url.pathname==='/api/image-tasks'){
     if(url.searchParams.get('ids')==='slow')return send({status:'processing',task_id:'slow'});
+    if(url.searchParams.get('ids')==='late-images'){
+      lateImagePolls++;
+      if(lateImagePolls<=7)return send({status:'completed',task_id:'late-images'});
+      return send({status:'completed',task_id:'late-images',data:[{b64_json:'aGVsbG8='}]});
+    }
     return send({status:'completed',data:[{b64_json:'aGVsbG8='}]});
   }
   res.writeHead(404);res.end();
@@ -51,6 +58,7 @@ let cookie='';
 test.after(async()=>{await stop(app.server);await stop(upstream);});
 test('解析同步图片、异步任务与失败',()=>{
   assert.equal(app.SUBMIT_TIMEOUT,240_000);
+  assert.equal(app.COMPLETED_WITHOUT_IMAGES_RETRIES,12);
   assert.equal(app.parseUpstream({data:[{b64_json:'abcd'}]}).kind,'done');
   assert.equal(app.parseUpstream({task_id:'t1',status:'queued'}).kind,'async');
   assert.equal(app.parseUpstream({status:'failed',error:{message:'bad'}}).kind,'error');
@@ -78,11 +86,11 @@ test('首页、健康检查、匿名 cookie、无敏感配置输出',async()=>{
   assert.equal(JSON.stringify(config.data).includes('test-token'),false);
 });
 const post = (prompt,images=[])=>json('/api/jobs',{method:'POST',headers:{'content-type':'application/json',Cookie:cookie},body:JSON.stringify({prompt,options:{model:'gpt-image-2.5-sunburst',count:1},images})});
-async function waitFor(id){
-  for(let n=0;n<25;n++){
+async function waitFor(id,maxAttempts=25,interval=150){
+  for(let n=0;n<maxAttempts;n++){
     const r=await json('/api/jobs/'+id,{headers:{Cookie:cookie}});
     if(['succeeded','failed','cancelled'].includes(r.data?.job?.status))return r.data.job;
-    await new Promise(resolve=>setTimeout(resolve,150));
+    await new Promise(resolve=>setTimeout(resolve,interval));
   }
   throw Error('Timeout waiting on task '+id);
 }
@@ -106,6 +114,15 @@ test('上游忽略 async 参数、延迟后直接返回图片时仍成功',async
   assert.equal(result.images.length,1);
   assert.ok(result.submitMs>=1000);
   assert.equal(result.polls,0);
+});
+test('上游先连续返回完成状态但没有图片，第 8 次查询后返回图片',async()=>{
+  const p=await post('late-images kitten');
+  assert.equal(p.status,202);
+  const result=await waitFor(p.data.job.id,220,150);
+  assert.equal(result.status,'succeeded');
+  assert.equal(result.images.length,1);
+  assert.equal(lateImagePolls,8);
+  assert.equal(result.polls,8);
 });
 test('参考图编辑通过 multipart 发送到上游',async()=>{
   const p=await post('把背景换成蓝色',['data:image/png;base64,aGVsbG8=']);
