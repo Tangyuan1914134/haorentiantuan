@@ -117,26 +117,68 @@ function extractImages(data){
     if(typeof x.base64==='string')return walk('data:image/png;base64,'+x.base64,depth+1);
     if(typeof x.url==='string')return walk(x.url,depth+1);
     if(typeof x.image_url==='string')return walk(x.image_url,depth+1);
-    for(const k of ['images','data','output','outputs','result','results','image','response'])if(x[k]!=null)walk(x[k],depth+1);
+    for(const k of ['images','data','output','outputs','result','results','image','response','task','tasks','payload'])if(x[k]!=null)walk(x[k],depth+1);
   };
   walk(data);return [...new Set(out)];
 }
 function parseUpstream(data) {
-  const candidates=Array.isArray(data)?data:[data,data?.data,data?.result,data?.tasks,data?.data?.tasks].flat().filter(Boolean);
-  const entry=candidates.find(x=>x && typeof x==='object' && (x.status||x.state||x.task_id||x.id))||data;
+  const nodes=[];
+  const seen=new Set();
+  const walk=(value,path='$',depth=0)=>{
+    if(!value||typeof value!=='object'||depth>8||seen.has(value))return;
+    seen.add(value);
+    nodes.push({value,path});
+    if(Array.isArray(value)){
+      for(let i=0;i<value.length;i++)walk(value[i],path+'['+i+']',depth+1);
+      return;
+    }
+    for(const [key,child] of Object.entries(value)){
+      if(child&&typeof child==='object')walk(child,path+'.'+key,depth+1);
+    }
+  };
+  walk(data);
+  const statusOf=value=>String(value?.status??value?.state??value?.task_status??value?.taskStatus??'').trim().toLowerCase().replace(/[\s-]+/g,'_');
+  const success=new Set(['success','succeeded','completed','complete','done','finished','ready']);
+  const pending=new Set(['queued','queue','pending','submitted','processing','in_progress','running','created','waiting','starting','accepted','generating','retrying']);
+  const failures=new Set(['error','failed','failure','cancelled','canceled','aborted']);
+  const statuses=nodes.map(n=>({ ...n, status:statusOf(n.value) })).filter(n=>n.status);
+  const failed= statuses.find(n=>failures.has(n.status));
+  if(failed){
+    const detail=nodes.find(n=>n.value?.error||n.value?.fail_reason||n.value?.failReason||n.value?.error_message||n.value?.errorMessage);
+    const err=detail?.value?.error;
+    const message=err?.message||err?.detail||err||detail?.value?.fail_reason||detail?.value?.failReason||detail?.value?.error_message||detail?.value?.errorMessage||detail?.value?.message||failed.value?.message||'上游任务失败';
+    return {kind:'error',message:String(message).slice(0,350)};
+  }
   const images=extractImages(data);
-  const status=String(entry?.status||entry?.state||data?.status||'').toLowerCase();
-  if(images.length && (!status || ['success','succeeded','completed','done','finished'].includes(status)))return {kind:'done',images};
-  if(['error','failed','cancelled','canceled'].includes(status))return {kind:'error',message:String(entry?.error?.message||entry?.error||data?.message||'上游任务失败')};
-  const taskId=entry?.task_id||data?.task_id||(status?entry?.id||data?.id:null);
-  if(taskId) {
-    if(['success','succeeded','completed','done','finished'].includes(status)&&!images.length)
-      return {kind:'pending',id:String(taskId),status:'completed-without-images'};
-    return {kind:'async',id:String(taskId),status};
+  const pendingStatus=statuses.find(n=>pending.has(n.status));
+  const terminalSuccess=statuses.find(n=>success.has(n.status));
+  if(images.length&&(terminalSuccess||!pendingStatus))return {kind:'done',images};
+  const explicitIdKeys=['task_id','taskId','taskID','job_id','jobId','request_id','requestId','task_uuid','taskUuid'];
+  let taskId=null;
+  for(const {value} of nodes){
+    for(const key of explicitIdKeys){
+      const candidate=value?.[key];
+      if((typeof candidate==='string'||typeof candidate==='number')&&String(candidate).trim()){
+        taskId=String(candidate);break;
+      }
+    }
+    if(taskId)break;
+  }
+  if(!taskId){
+    const withIdAndStatus=nodes.find(({value})=>{
+      const id=value?.id;
+      return (typeof id==='string'||typeof id==='number')&&String(id).trim()&&statusOf(value);
+    });
+    if(withIdAndStatus)taskId=String(withIdAndStatus.value.id);
+  }
+  if(taskId){
+    if(terminalSuccess&&!images.length)return {kind:'pending',id:taskId,status:'completed-without-images'};
+    return {kind:'async',id:taskId,status:pendingStatus?.status||statuses[0]?.status||''};
   }
   if(images.length)return {kind:'done',images};
-  if(['queued','pending','processing','running','in_progress','generating'].includes(status))return {kind:'pending',status};
-  return {kind:'error',message:'无法识别中转站返回的任务格式，请核对上游 API 文档'};
+  if(pendingStatus)return {kind:'pending',status:pendingStatus.status};
+  const shape=nodes.filter(n=>!Array.isArray(n.value)).slice(0,5).map(({value,path})=>path+'['+Object.keys(value).slice(0,7).join(',')+']').join(' → ');
+  return {kind:'error',message:'无法识别中转站返回的任务格式。响应字段：'+(shape||'空响应')+'。请核对上游异步 API 格式'};
 }
 async function requestJson(url,options){
   const response=await fetch(url,options);

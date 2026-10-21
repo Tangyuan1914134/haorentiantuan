@@ -49,6 +49,16 @@ test('解析同步图片、异步任务与失败',()=>{
   assert.equal(app.parseUpstream({task_id:'t1',status:'queued'}).kind,'async');
   assert.equal(app.parseUpstream({status:'failed',error:{message:'bad'}}).kind,'error');
 });
+test('兼容中转站嵌套和 camelCase 任务响应',()=>{
+  assert.deepEqual(app.parseUpstream({success:true,data:{taskId:'nested-task',status:'queued'}}),{kind:'async',id:'nested-task',status:'queued'});
+  assert.deepEqual(app.parseUpstream({code:0,data:{task:{id:'inner-task',state:'in_progress'}}}),{kind:'async',id:'inner-task',status:'in_progress'});
+  const result=app.parseUpstream({success:true,data:{result:{data:[{url:'https://cdn.example.test/result.png'}]}}});
+  assert.equal(result.kind,'done');
+  assert.deepEqual(result.images,['https://cdn.example.test/result.png']);
+  const failed=app.parseUpstream({data:{task:{taskId:'bad-task',status:'failed',fail_reason:'model overloaded'}}});
+  assert.equal(failed.kind,'error');
+  assert.match(failed.message,/model overloaded/);
+});
 test('首页、健康检查、匿名 cookie、无敏感配置输出',async()=>{
   const page=await fetch(base+'/');assert.equal(page.status,200);
   assert.match(await page.text(),/好人天团/);
