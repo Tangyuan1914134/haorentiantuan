@@ -17,8 +17,9 @@ const API_BASE_URL = (process.env.API_BASE_URL || 'https://image.mlgb7.com/v1').
 const API_KEY = process.env.IMAGE_API_KEY || '';
 const API_ASYNC = process.env.IMAGE_ASYNC !== 'false';
 const MAX_UPSTREAM_WAIT = LIMIT('MAX_UPSTREAM_WAIT_SECONDS', 540, 600) * 1000;
-// Async task creation should return quickly. Do not wait several minutes on an unacknowledged POST.
-const SUBMIT_TIMEOUT = LIMIT('UPSTREAM_SUBMIT_TIMEOUT_SECONDS', 60, 120) * 1000;
+// Some gateways ignore async=true and return generated images directly after 60+ seconds.
+// Keep the upstream POST alive without blocking the browser's own queued-job request.
+const SUBMIT_TIMEOUT = LIMIT('UPSTREAM_SUBMIT_TIMEOUT_SECONDS', 240, 600) * 1000;
 const POLL_TIMEOUT = LIMIT('UPSTREAM_POLL_TIMEOUT_SECONDS', 20, 90) * 1000;
 const MODELS = (process.env.IMAGE_MODELS || 'gpt-image-2.5-sunburst,gpt-image-2.5-flare,gpt-image-2.5').split(',').map(s => s.trim()).filter(Boolean);
 const RATIOS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'];
@@ -244,7 +245,7 @@ async function generate(job,signal){
   }
   const endpoint=API_BASE_URL+(files.length?'/images/edits':'/images/generations')+(API_ASYNC?'?async=true':'');
   job.phase='submitting';
-  job.progress='正在请求上游任务编号';
+  job.progress='等待上游返回图片或任务编号';
   const started=Date.now();
   const response=await requestTimed(endpoint,{method:'POST',headers,body,signal},API_ASYNC?SUBMIT_TIMEOUT:MAX_UPSTREAM_WAIT,'上游提交请求');
   job.submitMs=Date.now()-started;
@@ -372,4 +373,4 @@ const server=http.createServer(async(req,res)=>{
 if(process.env.NODE_ENV!=='test'&&process.env.RUN_TEST_SERVER!=='false'){
   server.listen(PORT,HOST,()=>console.log('好人天团 listening on '+HOST+':'+PORT+' | memory-only | upstream '+(API_KEY?'configured':'missing')));
 }
-export {server,parseUpstream,extractImages,validate};
+export {server,parseUpstream,extractImages,validate,SUBMIT_TIMEOUT};

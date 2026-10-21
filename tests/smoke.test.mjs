@@ -18,6 +18,10 @@ const upstream=http.createServer(async(req,res)=>{
     const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
     assert.ok(data.prompt);
     assert.equal(url.searchParams.get('async'),'true');
+    if(data.prompt.includes('delayed-sync')){
+      await new Promise(resolve=>setTimeout(resolve,1200));
+      return send({data:[{b64_json:'aGVsbG8='}]});
+    }
     return send({status:'queued',task_id:data.prompt.includes('slow')?'slow':'gen1'});
   }
   if(req.method==='POST' && url.pathname==='/v1/images/edits'){
@@ -38,6 +42,7 @@ process.env.PORT='9099';
 process.env.IMAGE_API_KEY='test-token';
 process.env.API_BASE_URL='http://127.0.0.1:'+upstreamPort+'/v1';
 process.env.IMAGE_ASYNC='true';
+delete process.env.UPSTREAM_SUBMIT_TIMEOUT_SECONDS;
 const app=await import('../server.mjs');
 const appPort=await listen(app.server);
 const base='http://127.0.0.1:'+appPort;
@@ -45,6 +50,7 @@ const json=(path,options)=>fetch(base+path,options).then(async r=>({status:r.sta
 let cookie='';
 test.after(async()=>{await stop(app.server);await stop(upstream);});
 test('解析同步图片、异步任务与失败',()=>{
+  assert.equal(app.SUBMIT_TIMEOUT,240_000);
   assert.equal(app.parseUpstream({data:[{b64_json:'abcd'}]}).kind,'done');
   assert.equal(app.parseUpstream({task_id:'t1',status:'queued'}).kind,'async');
   assert.equal(app.parseUpstream({status:'failed',error:{message:'bad'}}).kind,'error');
@@ -91,6 +97,15 @@ test('文本生成：入队、异步轮询、内存结果与访客隔离',async(
   assert.equal(result.images.length,1);
   assert.match(result.images[0],/^data:image\/png;base64,/);
   assert.equal(generationRequests,1);
+});
+test('上游忽略 async 参数、延迟后直接返回图片时仍成功',async()=>{
+  const p=await post('delayed-sync kitten');
+  assert.equal(p.status,202);
+  const result=await waitFor(p.data.job.id);
+  assert.equal(result.status,'succeeded');
+  assert.equal(result.images.length,1);
+  assert.ok(result.submitMs>=1000);
+  assert.equal(result.polls,0);
 });
 test('参考图编辑通过 multipart 发送到上游',async()=>{
   const p=await post('把背景换成蓝色',['data:image/png;base64,aGVsbG8=']);

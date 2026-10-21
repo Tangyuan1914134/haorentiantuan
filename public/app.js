@@ -142,7 +142,7 @@ function updateWaitingScene(msg,scene){
   const seconds=String(elapsed%60).padStart(2,'0');
   scene.querySelector('[data-waiting-time]').textContent=minutes+':'+seconds;
   const hint=elapsed>=60 && phase==='submitting'
-    ? '提交已等待超过 1 分钟，仍在等上游确认；若超时会提示原因'
+    ? '上游可能正在直接生成图片，继续等待即可；请勿重复提交'
     : WAITING_TIPS[Math.floor(elapsed/9)%WAITING_TIPS.length];
   scene.querySelector('[data-waiting-tip]').textContent=hint;
 }
